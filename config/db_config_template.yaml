@@ -1,0 +1,21 @@
+# MySQL Database Configuration Template
+# Copy this file to db_config.yaml and update with your actual credentials
+
+mysql:
+  host: <your_mysql_host>
+  port: <your_mysql_port>
+  database: <your_database_name>
+  user: <your_username>
+  password: <your_password>
+  
+# Alternative: Use sample CSV data instead of MySQL
+use_sample_data: true  # Set to false when using real MySQL database
+
+# Sample data configuration
+sample_data:
+  directory: data/sample_datasets/
+  files:
+    decision_history: decision_history.csv
+    access_usage: access_usage.csv
+    peer_group: peer_group.csv
+

@@ -1,0 +1,102 @@
+# Schema Configuration
+# Define your database tables, columns, and relationships here
+# This configuration is used to dynamically fetch and process data
+
+tables:
+  # Decision History - tracks approval/rejection decisions
+  decision_history:
+    columns:
+      - request_id
+      - user_id
+      - access_item
+      - decision          # Target variable for classification (approve/reject)
+      - timestamp
+      - requester_role
+      - approver_id
+      - risk_score
+    primary_key: request_id
+    join_keys: [user_id, access_item]
+    
+  # Access Usage - tracks how frequently access is used
+  access_usage:
+    columns:
+      - user_id
+      - access_item
+      - last_used_date
+      - frequency         # How many times accessed
+      - access_type       # Role, Entitlement, etc.
+    join_keys: [user_id, access_item]
+    
+  # Peer Group - user organizational context
+  peer_group:
+    columns:
+      - user_id
+      - peer_group_id
+      - role
+      - department
+      - seniority_level
+      - location
+    primary_key: user_id
+    join_keys: [user_id]
+
+# Define which tables should be merged and how
+merge_strategy:
+  base_table: decision_history
+  joins:
+    - table: access_usage
+      "on": [user_id, access_item]
+      how: left  # left, right, inner, outer
+    - table: peer_group
+      "on": [user_id]
+      how: left
+
+# ML Configuration
+ml_config:
+  # Target column for supervised learning
+  target_column: decision
+  
+  # Columns to exclude from features
+  exclude_columns:
+    - request_id
+    - timestamp
+    - approver_id
+  
+  # Feature engineering
+  date_columns:
+    - timestamp
+    - last_used_date
+  
+  categorical_columns:
+    - access_item
+    - requester_role
+    - access_type
+    - role
+    - department
+    - location
+    - decision
+  
+  numerical_columns:
+    - frequency
+    - risk_score
+    - seniority_level
+  
+  # Model types to run
+  models:
+    classification:
+      enabled: true
+      algorithms: [random_forest, logistic_regression, gradient_boosting]
+    clustering:
+      enabled: true
+      algorithms: [kmeans, dbscan]
+    regression:
+      enabled: false
+      algorithms: [linear_regression, random_forest]
+
+# Insight Generation Config
+insights_config:
+  generate_feature_importance: true
+  identify_access_reduction: true
+  detect_anomalies: true
+  risk_threshold: 0.7  # Risk scores above this are flagged
+  low_usage_threshold: 5  # Frequency below this suggests reduction candidate
+
