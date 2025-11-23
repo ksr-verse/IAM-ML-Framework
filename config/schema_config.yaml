@@ -14,6 +14,8 @@ tables:
       - requester_role
       - approver_id
       - risk_score
+      - sod_conflict      # Segregation of Duties conflict flag
+      - is_privileged_access  # Privileged access indicator
     primary_key: request_id
     join_keys: [user_id, access_item]
     
@@ -36,8 +38,19 @@ tables:
       - department
       - seniority_level
       - location
+      - employment_type  # FTE/Contractor/Intern
     primary_key: user_id
     join_keys: [user_id]
+    
+  # Recertification History - past certification decisions
+  recertification_history:
+    columns:
+      - user_id
+      - access_item
+      - last_certified_date
+      - certification_outcome  # approved/revoked/deferred
+      - certified_by
+    join_keys: [user_id, access_item]
 
 # Define which tables should be merged and how
 merge_strategy:
@@ -48,6 +61,9 @@ merge_strategy:
       how: left  # left, right, inner, outer
     - table: peer_group
       "on": [user_id]
+      how: left
+    - table: recertification_history
+      "on": [user_id, access_item]
       how: left
 
 # ML Configuration
@@ -65,6 +81,7 @@ ml_config:
   date_columns:
     - timestamp
     - last_used_date
+    - last_certified_date
   
   categorical_columns:
     - access_item
@@ -74,6 +91,10 @@ ml_config:
     - department
     - location
     - decision
+    - employment_type
+    - certification_outcome
+    - sod_conflict
+    - is_privileged_access
   
   numerical_columns:
     - frequency
@@ -84,7 +105,8 @@ ml_config:
   models:
     classification:
       enabled: true
-      algorithms: [random_forest, logistic_regression, gradient_boosting]
+      # Priority order: RF → GB → LightGBM → XGBoost → Logistic
+      algorithms: [random_forest, gradient_boosting, lightgbm, xgboost, logistic_regression]
     clustering:
       enabled: true
       algorithms: [kmeans, dbscan]

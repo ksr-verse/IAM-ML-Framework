@@ -396,7 +396,7 @@ class Visualizer:
             axes[0, 0].set_yticks(range(len(low_usage)))
             axes[0, 0].set_yticklabels(low_usage['access_item'])
             axes[0, 0].set_xlabel('Average Usage Frequency')
-            axes[0, 0].set_title('⚠️ LOW USAGE ACCESS - REMOVAL CANDIDATES\n(Top 15 - Used <5 times)', 
+            axes[0, 0].set_title('LOW USAGE ACCESS - REMOVAL CANDIDATES\n(Top 15 - Used <5 times)', 
                                 fontweight='bold', fontsize=12, color='red')
             axes[0, 0].axvline(5, color='black', linestyle='--', label='Threshold (5)')
             axes[0, 0].legend()
@@ -415,7 +415,7 @@ class Visualizer:
             axes[0, 1].set_yticks(range(len(unused)))
             axes[0, 1].set_yticklabels(unused['access_item'])
             axes[0, 1].set_xlabel('Days Since Last Use')
-            axes[0, 1].set_title('🚨 UNUSED ACCESS - IMMEDIATE REMOVAL\n(Top 15 - Not used 90+ days)', 
+            axes[0, 1].set_title('UNUSED ACCESS - IMMEDIATE REMOVAL\n(Top 15 - Not used 90+ days)', 
                                 fontweight='bold', fontsize=12, color='darkred')
             axes[0, 1].axvline(90, color='black', linestyle='--', label='Threshold (90 days)')
             axes[0, 1].legend()
@@ -434,7 +434,7 @@ class Visualizer:
             axes[1, 0].set_xticks(range(len(low_usage)))
             axes[1, 0].set_xticklabels(low_usage['access_item'], rotation=45, ha='right')
             axes[1, 0].set_ylabel('Number of Users Affected')
-            axes[1, 0].set_title('📊 REMOVAL IMPACT ANALYSIS\n(How many users will be affected)', 
+            axes[1, 0].set_title('REMOVAL IMPACT ANALYSIS\n(How many users will be affected)', 
                                 fontweight='bold', fontsize=12)
             axes[1, 0].grid(axis='y', alpha=0.3)
         else:
@@ -447,23 +447,23 @@ class Visualizer:
         ACCESS REMOVAL RECOMMENDATIONS
         ═══════════════════════════════════════
         
-        📌 TOTAL REMOVAL OPPORTUNITIES: {access_reduction.get('summary', 'N/A')}
+        TOTAL REMOVAL OPPORTUNITIES: {access_reduction.get('summary', 'N/A')}
         
-        🔴 LOW USAGE ACCESS:
+        LOW USAGE ACCESS:
            {len(access_reduction.get('low_usage_candidates', []))} items used <5 times
            → Recommend: Review and remove unused entitlements
         
-        🔴 UNUSED ACCESS (90+ days):
+        UNUSED ACCESS (90+ days):
            {len(access_reduction.get('unused_access', []))} items not used recently
-           → Recommend: Immediate removal/revocation
+           -> Recommend: Immediate removal/revocation
         
-        💡 BUSINESS IMPACT:
+        BUSINESS IMPACT:
            - Reduced security risk
            - Lower licensing costs
            - Simplified access management
            - Better compliance posture
         
-        ⚠️ ACTION REQUIRED:
+        ACTION REQUIRED:
            Review highlighted access items with business owners
            for potential removal or policy update.
         """
@@ -511,8 +511,8 @@ class Visualizer:
         predictions_array = model.predict(features)
         confidence = model.predict_proba(features).max(axis=1)
         
-        fig = plt.figure(figsize=(16, 12))
-        gs = fig.add_gridspec(3, 3, hspace=0.3, wspace=0.3)
+        fig = plt.figure(figsize=(16, 10))
+        gs = fig.add_gridspec(2, 3, hspace=0.3, wspace=0.3)
         
         # 1. Confidence Distribution (TOP LEFT)
         ax1 = fig.add_subplot(gs[0, :2])
@@ -572,21 +572,22 @@ class Visualizer:
                 ax3.text(val + 5, bar.get_y() + bar.get_height()/2, 
                         str(val), va='center', fontweight='bold')
         
-        # 4. Low Confidence Predictions (MIDDLE RIGHT)
-        ax4 = fig.add_subplot(gs[1, 2])
+        # 4. Low Confidence Predictions (BOTTOM LEFT)
+        ax4 = fig.add_subplot(gs[1, 0])
         low_conf_mask = confidence < 0.6
         low_conf_text = f"""
         LOW CONFIDENCE
         PREDICTIONS
         
         Count: {low_conf_mask.sum()}
+        ({low_conf_mask.sum()/len(confidence)*100:.1f}%)
         
         What this means:
         
         • Unclear policies
         • Edge cases
         • Contradictory
-          training data
+          patterns
         • Need human
           review
         
@@ -599,43 +600,48 @@ class Visualizer:
                 fontfamily='monospace')
         ax4.axis('off')
         
-        # 5. Pattern Discovery Example (BOTTOM LEFT)
-        ax5 = fig.add_subplot(gs[2, :2])
-        pattern_text = """
-        PATTERNS ML DISCOVERED (That Humans Missed):
+        # 5. Pattern Discovery Example (BOTTOM MIDDLE & RIGHT) - REAL DATA!
+        ax5 = fig.add_subplot(gs[1, 1:])
         
-        Pattern 1: High Risk (>0.7) + Finance Dept → 85% Rejection
-        Pattern 2: 3 AM Requests + Low Frequency → 78% Rejection  
-        Pattern 3: Manager Role + Low Risk → 92% Approval
-        Pattern 4: Timestamp Hour 14-16 (Business hours) → Higher approval
+        # Get real patterns from insights
+        pattern_lines = ["PATTERNS ML DISCOVERED (From Your Actual Data):\n"]
         
-        → ML reveals unconscious biases and hidden operational patterns
-        → These insights help refine IAM policies
-        """
+        # Try to load patterns from insights
+        import json
+        insights_files = [f for f in os.listdir('outputs/insights') if f.startswith('insights_') and f.endswith('.json')]
+        
+        if insights_files:
+            latest_insights = sorted(insights_files)[-1]
+            with open(os.path.join('outputs/insights', latest_insights), 'r') as f:
+                insights_data = json.load(f)
+                
+            if 'pattern_discovery' in insights_data and 'patterns' in insights_data['pattern_discovery']:
+                real_patterns = insights_data['pattern_discovery']['patterns']
+                
+                for i, pattern in enumerate(real_patterns[:4], 1):
+                    pattern_lines.append(
+                        f"Pattern {i}: {pattern['pattern']} → {pattern['probability']:.0f}% {pattern['outcome']}"
+                    )
+                    pattern_lines.append(f"            (based on {pattern['sample_size']} real requests)")
+                
+                if real_patterns:
+                    pattern_lines.append("\n→ ML reveals unconscious biases and hidden operational patterns")
+                    pattern_lines.append("→ These insights help refine IAM policies and improve consistency")
+                else:
+                    pattern_lines.append("\nNo significant patterns found in current dataset")
+            else:
+                pattern_lines.append("\nPattern analysis in progress...")
+        else:
+            pattern_lines.append("\nPattern analysis in progress...")
+        
+        pattern_text = '\n'.join(pattern_lines)
+        
         ax5.text(0.05, 0.5, pattern_text, transform=ax5.transAxes,
                 fontsize=11, verticalalignment='center',
                 bbox=dict(boxstyle='round', facecolor='lightcyan', alpha=0.8),
                 fontfamily='monospace', fontweight='bold')
-        ax5.set_title('HIDDEN PATTERNS REVEALED BY ML', fontweight='bold', fontsize=13)
+        ax5.set_title('HIDDEN PATTERNS REVEALED BY ML (REAL DATA)', fontweight='bold', fontsize=13)
         ax5.axis('off')
-        
-        # 6. Accuracy Over Time (Conceptual) (BOTTOM RIGHT)
-        ax6 = fig.add_subplot(gs[2, 2])
-        weeks = ['Week 1', 'Week 4', 'Week 8', 'Week 12']
-        accuracy_growth = [82, 85, 87, 91]
-        
-        ax6.plot(weeks, accuracy_growth, marker='o', linewidth=3, 
-                markersize=10, color='green', label='Accuracy %')
-        ax6.fill_between(range(len(weeks)), accuracy_growth, alpha=0.3, color='green')
-        ax6.set_ylabel('Accuracy %', fontsize=11)
-        ax6.set_title('FEEDBACK LOOP\nAccuracy Growth', 
-                     fontweight='bold', fontsize=12)
-        ax6.grid(True, alpha=0.3)
-        ax6.set_ylim([75, 95])
-        
-        # Add annotations
-        for i, (week, acc) in enumerate(zip(weeks, accuracy_growth)):
-            ax6.text(i, acc + 1, f'{acc}%', ha='center', fontweight='bold')
         
         plt.suptitle('ML PREDICTION DEEP DIVE - What Your Approvals Teach the Model', 
                     fontsize=16, fontweight='bold', y=0.98)

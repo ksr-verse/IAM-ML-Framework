@@ -22,8 +22,24 @@ from sklearn.metrics import (
     silhouette_score, davies_bouldin_score
 )
 
+# Setup logging first
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Advanced ML algorithms
+try:
+    import xgboost as xgb
+    XGBOOST_AVAILABLE = True
+except ImportError:
+    XGBOOST_AVAILABLE = False
+    logger.warning("XGBoost not available - install with: pip install xgboost")
+
+try:
+    import lightgbm as lgb
+    LIGHTGBM_AVAILABLE = True
+except ImportError:
+    LIGHTGBM_AVAILABLE = False
+    logger.warning("LightGBM not available - install with: pip install lightgbm")
 
 
 class ModelTrainer:
@@ -114,15 +130,64 @@ class ModelTrainer:
         
         logger.info(f"Training set: {X_train.shape}, Test set: {X_test.shape}")
         
-        # Define models
-        models = {
+        # Get algorithms from config (respect priority order)
+        config_algorithms = []
+        if self.ml_config and 'models' in self.ml_config:
+            classification_config = self.ml_config['models'].get('classification', {})
+            if classification_config.get('enabled', True):
+                config_algorithms = classification_config.get('algorithms', [])
+        
+        # If no config, use default priority order
+        if not config_algorithms:
+            config_algorithms = ['random_forest', 'gradient_boosting', 'lightgbm', 'xgboost', 'logistic_regression']
+        
+        logger.info(f"Training algorithms (priority order): {config_algorithms}")
+        
+        # Define all available models
+        available_models = {
             'random_forest': RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1),
             'logistic_regression': LogisticRegression(max_iter=1000, random_state=42),
             'gradient_boosting': GradientBoostingClassifier(n_estimators=100, random_state=42)
         }
         
-        # Train each model
-        for model_name, model in models.items():
+        # Add XGBoost if available
+        if XGBOOST_AVAILABLE:
+            available_models['xgboost'] = xgb.XGBClassifier(
+                n_estimators=100,
+                random_state=42,
+                eval_metric='logloss',
+                n_jobs=-1
+            )
+        else:
+            if 'xgboost' in config_algorithms:
+                logger.warning("XGBoost requested in config but not available. Install with: pip install xgboost")
+        
+        # Add LightGBM if available
+        if LIGHTGBM_AVAILABLE:
+            available_models['lightgbm'] = lgb.LGBMClassifier(
+                n_estimators=100,
+                random_state=42,
+                verbose=-1,
+                n_jobs=-1
+            )
+        else:
+            if 'lightgbm' in config_algorithms:
+                logger.warning("LightGBM requested in config but not available. Install with: pip install lightgbm")
+        
+        # Filter models based on config (respect priority order)
+        models_to_train = {}
+        for algo in config_algorithms:
+            if algo in available_models:
+                models_to_train[algo] = available_models[algo]
+            else:
+                logger.warning(f"Algorithm '{algo}' requested in config but not available/implemented")
+        
+        if not models_to_train:
+            logger.error("No models available to train!")
+            return
+        
+        # Train each model in priority order
+        for model_name, model in models_to_train.items():
             logger.info(f"\nTraining {model_name}...")
             
             try:

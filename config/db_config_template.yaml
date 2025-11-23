@@ -7,6 +7,12 @@ mysql:
   database: <your_database_name>
   user: <your_username>
   password: <your_password>
+  # Additional connection parameters for better reliability
+  connection_timeout: 10  # Timeout in seconds for connection attempts
+  charset: utf8mb4  # Character encoding
+  autocommit: true  # Auto-commit transactions
+  use_unicode: true  # Use Unicode for string handling
+  raise_on_warnings: false  # Don't raise exceptions on warnings
   
 # Alternative: Use sample CSV data instead of MySQL
 use_sample_data: true  # Set to false when using real MySQL database
@@ -18,4 +24,5 @@ sample_data:
     decision_history: decision_history.csv
     access_usage: access_usage.csv
     peer_group: peer_group.csv
+    recertification_history: recertification_history.csv
 

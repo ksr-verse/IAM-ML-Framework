@@ -31,10 +31,43 @@ class DatabaseConnector:
             db_config_path: Path to database configuration file
             schema_config_path: Path to schema configuration file
         """
-        self.db_config = self._load_config(db_config_path)
-        self.schema_config = self._load_config(schema_config_path)
+        # Resolve paths to absolute paths
+        self.db_config_path = self._resolve_path(db_config_path)
+        self.schema_config_path = self._resolve_path(schema_config_path)
+        
+        # Determine project root (parent of config directory)
+        if 'config' in os.path.dirname(self.db_config_path):
+            self.project_root = os.path.dirname(os.path.dirname(self.db_config_path))
+        else:
+            # Fallback: use current working directory
+            self.project_root = os.getcwd()
+        
+        self.db_config = self._load_config(self.db_config_path)
+        self.schema_config = self._load_config(self.schema_config_path)
         self.connection = None
         self.use_sample_data = self.db_config.get('use_sample_data', True)
+        
+        logger.info(f"Project root directory: {self.project_root}")
+        if self.use_sample_data:
+            logger.info("Mode: Using sample CSV data files")
+        else:
+            logger.info("Mode: Using MySQL database connection")
+    
+    def _resolve_path(self, path: str) -> str:
+        """Resolve a path to absolute path."""
+        if os.path.isabs(path):
+            return path
+        # Try relative to current working directory first
+        if os.path.exists(path):
+            return os.path.abspath(path)
+        # Try relative to this file's directory
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        parent_dir = os.path.dirname(script_dir)  # Go up from src/ to project root
+        resolved = os.path.join(parent_dir, path)
+        if os.path.exists(resolved):
+            return os.path.abspath(resolved)
+        # Return as-is if not found (will raise error in _load_config)
+        return os.path.abspath(path)
         
     def _load_config(self, config_path: str) -> dict:
         """Load YAML configuration file."""
@@ -63,13 +96,26 @@ class DatabaseConnector:
             
         try:
             mysql_config = self.db_config['mysql']
-            self.connection = mysql.connector.connect(
-                host=mysql_config['host'],
-                port=mysql_config['port'],
-                database=mysql_config['database'],
-                user=mysql_config['user'],
-                password=mysql_config['password']
-            )
+            
+            # Build connection parameters with defaults
+            connection_params = {
+                'host': mysql_config['host'],
+                'port': mysql_config['port'],
+                'database': mysql_config['database'],
+                'user': mysql_config['user'],
+                'password': mysql_config['password']
+            }
+            
+            # Add optional connection parameters if specified
+            optional_params = [
+                'connection_timeout', 'charset', 'autocommit', 
+                'use_unicode', 'raise_on_warnings'
+            ]
+            for param in optional_params:
+                if param in mysql_config:
+                    connection_params[param] = mysql_config[param]
+            
+            self.connection = mysql.connector.connect(**connection_params)
             logger.info(f"Connected to MySQL database: {mysql_config['database']}")
             return True
         except mysql.connector.Error as e:
@@ -114,14 +160,25 @@ class DatabaseConnector:
             sample_config = self.db_config['sample_data']
             data_dir = sample_config['directory']
             filename = sample_config['files'].get(table_name, f"{table_name}.csv")
-            filepath = os.path.join(data_dir, filename)
+            
+            # Resolve path relative to project root
+            if not os.path.isabs(data_dir):
+                filepath = os.path.join(self.project_root, data_dir, filename)
+            else:
+                filepath = os.path.join(data_dir, filename)
+            
+            # Normalize path (handle .. and .)
+            filepath = os.path.normpath(filepath)
             
             if not os.path.exists(filepath):
                 logger.warning(f"CSV file not found: {filepath}")
+                logger.warning(f"  Project root: {self.project_root}")
+                logger.warning(f"  Looking for: {table_name}")
                 return None
                 
             df = pd.read_csv(filepath)
-            logger.info(f"Loaded {len(df)} rows from {filepath}")
+            logger.info(f"Loaded {len(df)} rows from CSV: {os.path.basename(filepath)}")
+            logger.debug(f"Full path: {filepath}")
             return df
             
         except Exception as e:

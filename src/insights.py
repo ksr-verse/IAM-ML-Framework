@@ -40,6 +40,30 @@ class InsightsGenerator:
         # Create output directory
         os.makedirs(output_dir, exist_ok=True)
     
+    def _find_best_model(self) -> Optional[str]:
+        """
+        Automatically find the best trained model based on feature importance.
+        
+        Returns:
+            Path to best model, or None if not found
+        """
+        # Look for all classifier models
+        model_files = [f for f in os.listdir(self.models_dir) if f.endswith('_classifier.pkl')]
+        
+        if not model_files:
+            return None
+        
+        # Prefer models with feature importance (tree-based models)
+        priority_order = ['random_forest', 'gradient_boosting', 'logistic_regression']
+        
+        for model_name in priority_order:
+            for model_file in model_files:
+                if model_name in model_file:
+                    return os.path.join(self.models_dir, model_file)
+        
+        # Fallback: return first available
+        return os.path.join(self.models_dir, model_files[0])
+    
     def generate_all_insights(self, features: pd.DataFrame, 
                              target: Optional[pd.Series] = None,
                              original_data: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
@@ -79,8 +103,16 @@ class InsightsGenerator:
         # Clustering Insights (if clustering model exists)
         self.insights['clusters'] = self._analyze_clusters(features, original_data)
         
+        # Pattern Discovery (REAL DATA - for Part 2 post)
+        if original_data is not None and target is not None:
+            self.insights['pattern_discovery'] = self._discover_decision_patterns(original_data, target)
+        
         # Save insights
         self._save_insights()
+        
+        # Pattern Discovery (NEW - for Part 2)
+        if target is not None and original_data is not None:
+            self.insights['pattern_discovery'] = self._discover_approval_patterns(original_data, target)
         
         logger.info("=== Insights Generation Complete ===")
         return self.insights
@@ -295,9 +327,10 @@ class InsightsGenerator:
         
         prediction_analysis = {}
         
-        # Try to load best classification model
-        model_path = os.path.join(self.models_dir, 'random_forest_classifier.pkl')
-        if os.path.exists(model_path):
+        # Automatically find and load BEST classification model
+        model_path = self._find_best_model()
+        if model_path and os.path.exists(model_path):
+            logger.info(f"  Using best model: {os.path.basename(model_path)}")
             model = joblib.load(model_path)
             predictions = model.predict(features)
             probabilities = model.predict_proba(features)
@@ -372,6 +405,98 @@ class InsightsGenerator:
         
         return cluster_analysis
     
+    def _discover_approval_patterns(self, data: pd.DataFrame, 
+                                   target: pd.Series) -> Dict[str, Any]:
+        """
+        Discover actual approval/rejection patterns from data.
+        Finds combinations like "High risk + Finance → 85% rejection"
+        
+        Args:
+            data: Original merged DataFrame
+            target: Target variable (decisions - encoded as 0=approve, 1=reject)
+            
+        Returns:
+            Dictionary with discovered patterns
+        """
+        logger.info("Discovering approval patterns from data...")
+        
+        patterns = []
+        
+        # Add decision column for analysis (0=approve, 1=reject)
+        analysis_data = data.copy()
+        analysis_data['decision_encoded'] = target.values
+        
+        # Pattern 1: High risk + Department
+        if 'risk_score' in analysis_data.columns and 'department' in analysis_data.columns:
+            high_risk = analysis_data[analysis_data['risk_score'] > 0.7]
+            if len(high_risk) > 0:
+                dept_rejection = high_risk.groupby('department').apply(
+                    lambda x: (x['decision_encoded'] == 1).sum() / len(x) * 100 if len(x) > 0 else 0
+                ).sort_values(ascending=False)
+                
+                if len(dept_rejection) > 0 and dept_rejection.iloc[0] > 0:
+                    top_dept = dept_rejection.index[0]
+                    rejection_rate = dept_rejection.iloc[0]
+                    patterns.append({
+                        'pattern': f'High Risk (>0.7) + {top_dept} Dept',
+                        'outcome': 'Rejection',
+                        'probability': round(rejection_rate, 1),
+                        'sample_size': len(high_risk[high_risk['department'] == top_dept])
+                    })
+        
+        # Pattern 2: After-hours requests + Low frequency
+        if 'timestamp_hour' in analysis_data.columns and 'frequency' in analysis_data.columns:
+            after_hours = analysis_data[
+                ((analysis_data['timestamp_hour'] < 6) | (analysis_data['timestamp_hour'] > 20)) &
+                (analysis_data['frequency'] < 10)
+            ]
+            if len(after_hours) > 10:
+                rejection_rate = (after_hours['decision_encoded'] == 1).sum() / len(after_hours) * 100
+                patterns.append({
+                    'pattern': 'After Hours (Before 6AM/After 8PM) + Low Frequency',
+                    'outcome': 'Rejection',
+                    'probability': round(rejection_rate, 1),
+                    'sample_size': len(after_hours)
+                })
+        
+        # Pattern 3: Manager role + Low risk
+        if 'requester_role' in analysis_data.columns and 'risk_score' in analysis_data.columns:
+            manager_low_risk = analysis_data[
+                (analysis_data['requester_role'] == 'Manager') &
+                (analysis_data['risk_score'] < 0.3)
+            ]
+            if len(manager_low_risk) > 10:
+                approval_rate = (manager_low_risk['decision_encoded'] == 0).sum() / len(manager_low_risk) * 100
+                patterns.append({
+                    'pattern': 'Manager Role + Low Risk (<0.3)',
+                    'outcome': 'Approval',
+                    'probability': round(approval_rate, 1),
+                    'sample_size': len(manager_low_risk)
+                })
+        
+        # Pattern 4: Business hours + IT department
+        if 'timestamp_hour' in analysis_data.columns and 'department' in analysis_data.columns:
+            business_hours_it = analysis_data[
+                (analysis_data['timestamp_hour'] >= 9) &
+                (analysis_data['timestamp_hour'] <= 17) &
+                (analysis_data['department'] == 'IT')
+            ]
+            if len(business_hours_it) > 10:
+                approval_rate = (business_hours_it['decision_encoded'] == 0).sum() / len(business_hours_it) * 100
+                patterns.append({
+                    'pattern': 'Business Hours (9-17) + IT Dept',
+                    'outcome': 'Approval',
+                    'probability': round(approval_rate, 1),
+                    'sample_size': len(business_hours_it)
+                })
+        
+        logger.info(f"  Discovered {len(patterns)} patterns from data")
+        
+        return {
+            'patterns': patterns,
+            'summary': f'Found {len(patterns)} significant approval patterns'
+        }
+    
     def _save_insights(self):
         """Save all insights to JSON and CSV files."""
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -412,6 +537,95 @@ class InsightsGenerator:
             csv_path = os.path.join(self.output_dir, f'insights_summary_{timestamp}.csv')
             csv_df.to_csv(csv_path, index=False)
             logger.info(f"Saved insights summary to {csv_path}")
+    
+    def _discover_decision_patterns(self, data: pd.DataFrame, target: pd.Series) -> Dict[str, Any]:
+        """
+        Discover REAL decision patterns from actual data.
+        Finds combinations that lead to high rejection/approval rates.
+        
+        Args:
+            data: Original merged DataFrame
+            target: Target decisions
+            
+        Returns:
+            Dictionary with discovered patterns
+        """
+        logger.info("Discovering decision patterns from real data...")
+        
+        patterns = []
+        
+        # Add target to data for analysis
+        data_with_target = data.copy()
+        data_with_target['decision_target'] = target
+        
+        # Pattern 1: High Risk + Department → Rejection Rate
+        if 'risk_score' in data.columns and 'department' in data.columns:
+            high_risk = data_with_target[data_with_target['risk_score'] > 0.7]
+            if len(high_risk) > 0:
+                for dept in high_risk['department'].unique():
+                    dept_data = high_risk[high_risk['department'] == dept]
+                    if len(dept_data) >= 10:  # At least 10 samples
+                        reject_rate = (dept_data['decision_target'] == 1).mean() * 100
+                        if reject_rate > 60:  # Significant rejection pattern
+                            patterns.append({
+                                'pattern': f"High Risk (>0.7) + {dept} Dept",
+                                'outcome': 'Rejection',
+                                'probability': reject_rate,
+                                'sample_size': len(dept_data)
+                            })
+        
+        # Pattern 2: After-hours requests (late night/early morning)
+        if 'timestamp' in data.columns:
+            data_with_target['hour'] = pd.to_datetime(data_with_target['timestamp']).dt.hour
+            after_hours = data_with_target[(data_with_target['hour'] < 6) | (data_with_target['hour'] > 22)]
+            if len(after_hours) >= 10:
+                reject_rate = (after_hours['decision_target'] == 1).mean() * 100
+                patterns.append({
+                    'pattern': 'After-hours requests (10PM-6AM)',
+                    'outcome': 'Rejection',
+                    'probability': reject_rate,
+                    'sample_size': len(after_hours)
+                })
+        
+        # Pattern 3: Role + Risk combination
+        if 'requester_role' in data.columns and 'risk_score' in data.columns:
+            for role in data_with_target['requester_role'].unique():
+                low_risk_role = data_with_target[
+                    (data_with_target['requester_role'] == role) & 
+                    (data_with_target['risk_score'] < 0.3)
+                ]
+                if len(low_risk_role) >= 10:
+                    approval_rate = (low_risk_role['decision_target'] == 0).mean() * 100
+                    if approval_rate > 80:  # High approval pattern
+                        patterns.append({
+                            'pattern': f"{role} Role + Low Risk (<0.3)",
+                            'outcome': 'Approval',
+                            'probability': approval_rate,
+                            'sample_size': len(low_risk_role)
+                        })
+        
+        # Pattern 4: Frequency + Access Type
+        if 'frequency' in data.columns and 'access_type' in data.columns:
+            low_freq = data_with_target[data_with_target['frequency'] < 5]
+            if len(low_freq) >= 10:
+                reject_rate = (low_freq['decision_target'] == 1).mean() * 100
+                if reject_rate > 60:
+                    patterns.append({
+                        'pattern': 'Low Usage Frequency (<5)',
+                        'outcome': 'Rejection',
+                        'probability': reject_rate,
+                        'sample_size': len(low_freq)
+                    })
+        
+        # Sort by probability (strongest patterns first)
+        patterns = sorted(patterns, key=lambda x: abs(x['probability'] - 50), reverse=True)
+        
+        logger.info(f"  Discovered {len(patterns)} real decision patterns")
+        
+        return {
+            'patterns': patterns[:10],  # Top 10
+            'summary': f"{len(patterns)} decision patterns discovered from real data"
+        }
     
     def generate_report(self) -> str:
         """

@@ -20,6 +20,7 @@ class IAMDataGenerator:
     - Decision history (approval/rejection decisions)
     - Access usage (how frequently access is used)
     - Peer group (organizational context)
+    - Recertification history (past certification decisions)
     """
     
     def __init__(self, n_users=500, n_access_items=100, n_requests=2000):
@@ -89,6 +90,16 @@ class IAMDataGenerator:
             # Risk score (influences decision)
             risk_score = np.random.beta(2, 5)  # Skewed towards lower risk
             
+            # SoD Conflict - critical for standing access
+            sod_conflict = random.random() < 0.15  # 15% have conflicts
+            if sod_conflict:
+                risk_score = min(risk_score + 0.2, 1.0)  # Conflicts increase risk
+            
+            # Privileged access flag
+            is_privileged = 'Admin' in access_item or 'Execute' in access_item or 'Delete' in access_item
+            if is_privileged:
+                risk_score = min(risk_score + 0.15, 1.0)  # Privileged = higher risk
+            
             # Decision logic (higher risk = more likely to reject)
             if risk_score > 0.7:
                 decision = np.random.choice(self.decisions, p=[0.3, 0.7])  # More likely reject
@@ -112,7 +123,9 @@ class IAMDataGenerator:
                 'timestamp': timestamp,
                 'requester_role': requester_role,
                 'approver_id': approver_id,
-                'risk_score': round(risk_score, 4)
+                'risk_score': round(risk_score, 4),
+                'sod_conflict': sod_conflict,
+                'is_privileged_access': is_privileged
             })
         
         df = pd.DataFrame(data)
@@ -186,10 +199,22 @@ class IAMDataGenerator:
         
         data = []
         
+        employment_types = ['FTE', 'Contractor', 'Intern']
+        
         for user_id in self.users:
             role = random.choice(self.roles)
             department = random.choice(self.departments)
             location = random.choice(self.locations)
+            
+            # Employment type - contractors have different patterns
+            employment_type = random.choice(employment_types)
+            # Weight: 70% FTE, 25% Contractor, 5% Intern
+            if random.random() < 0.7:
+                employment_type = 'FTE'
+            elif random.random() < 0.95:
+                employment_type = 'Contractor'
+            else:
+                employment_type = 'Intern'
             
             # Seniority level (1-5)
             if 'Director' in role or 'Manager' in role:
@@ -206,7 +231,8 @@ class IAMDataGenerator:
                 'role': role,
                 'department': department,
                 'seniority_level': seniority,
-                'location': location
+                'location': location,
+                'employment_type': employment_type
             })
         
         df = pd.DataFrame(data)
@@ -217,7 +243,60 @@ class IAMDataGenerator:
         
         return df
     
-    def save_datasets(self, output_dir='sample_datasets'):
+    def generate_recertification_history(self):
+        """
+        Generate recertification history dataset.
+        
+        Returns:
+            DataFrame with recertification history
+        """
+        print("\nGenerating recertification history...")
+        
+        data = []
+        base_date = datetime.now() - timedelta(days=730)  # 2 years back
+        
+        # Generate recertification for subset of users
+        n_recerts = int(self.n_users * 0.6)  # 60% of users have recert history
+        
+        for i in range(n_recerts):
+            user_id = random.choice(self.users)
+            access_item = random.choice(self.access_items)
+            
+            # Certification date (within last 2 years)
+            cert_date = base_date + timedelta(days=random.randint(0, 730))
+            
+            # Certification outcome
+            outcomes = ['approved', 'revoked', 'deferred']
+            outcome = random.choice(outcomes)
+            # Weight: 80% approved, 15% revoked, 5% deferred
+            if random.random() < 0.8:
+                outcome = 'approved'
+            elif random.random() < 0.95:
+                outcome = 'revoked'
+            else:
+                outcome = 'deferred'
+            
+            certifier_id = random.choice(self.users)
+            
+            data.append({
+                'user_id': user_id,
+                'access_item': access_item,
+                'last_certified_date': cert_date,
+                'certification_outcome': outcome,
+                'certified_by': certifier_id
+            })
+        
+        df = pd.DataFrame(data)
+        # Remove duplicates (one recert per user-access combo)
+        df = df.drop_duplicates(subset=['user_id', 'access_item'])
+        
+        print(f"  [OK] Generated {len(df)} recertification records")
+        print(f"  - Approved: {(df['certification_outcome'] == 'approved').sum()}")
+        print(f"  - Revoked: {(df['certification_outcome'] == 'revoked').sum()}")
+        
+        return df
+    
+    def save_datasets(self, output_dir='data/sample_datasets'):
         """
         Generate and save all datasets.
         
@@ -235,6 +314,7 @@ class IAMDataGenerator:
         decision_history = self.generate_decision_history()
         access_usage = self.generate_access_usage()
         peer_group = self.generate_peer_group()
+        recertification_history = self.generate_recertification_history()
         
         # Save to CSV
         print("\nSaving datasets...")
@@ -251,6 +331,10 @@ class IAMDataGenerator:
         peer_group.to_csv(peer_path, index=False)
         print(f"  [OK] Saved: {peer_path}")
         
+        recert_path = os.path.join(output_dir, 'recertification_history.csv')
+        recertification_history.to_csv(recert_path, index=False)
+        print(f"  [OK] Saved: {recert_path}")
+        
         print("\n" + "=" * 60)
         print("DATA GENERATION COMPLETE")
         print("=" * 60)
@@ -258,6 +342,7 @@ class IAMDataGenerator:
         print(f"  - Decision History: {len(decision_history)} records")
         print(f"  - Access Usage: {len(access_usage)} records")
         print(f"  - Peer Group: {len(peer_group)} records")
+        print(f"  - Recertification History: {len(recertification_history)} records")
         print(f"\nFiles saved to: {output_dir}/")
         print("=" * 60)
 
@@ -273,8 +358,8 @@ def main():
                        help='Number of access items (default: 100)')
     parser.add_argument('--requests', type=int, default=2000, 
                        help='Number of access requests (default: 2000)')
-    parser.add_argument('--output-dir', type=str, default='sample_datasets',
-                       help='Output directory for CSV files (default: sample_datasets)')
+    parser.add_argument('--output-dir', type=str, default='data/sample_datasets',
+                       help='Output directory for CSV files (default: data/sample_datasets)')
     
     args = parser.parse_args()
     
