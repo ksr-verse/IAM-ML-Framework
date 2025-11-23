@@ -511,18 +511,20 @@ class Visualizer:
         predictions_array = model.predict(features)
         confidence = model.predict_proba(features).max(axis=1)
         
-        fig = plt.figure(figsize=(16, 10))
-        gs = fig.add_gridspec(2, 3, hspace=0.3, wspace=0.3)
+        fig = plt.figure(figsize=(20, 14))
+        # Top row: histogram (2 cols) + bar chart (1 col)
+        # Bottom row: error chart (1 col) + low conf text (1 col) + patterns text (1 col)
+        gs = fig.add_gridspec(2, 3, hspace=0.5, wspace=0.4, height_ratios=[1, 1.1], width_ratios=[1, 1, 1])
         
         # 1. Confidence Distribution (TOP LEFT)
         ax1 = fig.add_subplot(gs[0, :2])
         ax1.hist(confidence, bins=30, color='steelblue', edgecolor='black', alpha=0.7)
         ax1.axvline(0.6, color='orange', linestyle='--', linewidth=2, label='Low Confidence (<60%)')
         ax1.axvline(0.8, color='green', linestyle='--', linewidth=2, label='High Confidence (>80%)')
-        ax1.set_xlabel('Prediction Confidence', fontsize=11)
-        ax1.set_ylabel('Number of Predictions', fontsize=11)
-        ax1.set_title('WHERE IS ML CONFIDENT?\nMost predictions >80% = Model has learned patterns', 
-                     fontweight='bold', fontsize=12)
+        ax1.set_xlabel('Prediction Confidence', fontsize=10)
+        ax1.set_ylabel('Number of Predictions', fontsize=10)
+        ax1.set_title('WHERE IS ML CONFIDENT?\nMost predictions >80% = Model learned patterns', 
+                     fontweight='bold', fontsize=10, pad=15)
         ax1.legend()
         ax1.grid(axis='y', alpha=0.3)
         
@@ -537,18 +539,21 @@ class Visualizer:
         colors = ['red', 'orange', 'green']
         
         ax2.bar(zones, counts, color=colors, alpha=0.7, edgecolor='black')
-        ax2.set_ylabel('Count', fontsize=11)
-        ax2.set_title('CONFIDENCE ZONES', fontweight='bold', fontsize=12)
+        ax2.set_ylabel('Count', fontsize=10)
+        ax2.set_title('CONFIDENCE ZONES', fontweight='bold', fontsize=10, pad=15)
         ax2.grid(axis='y', alpha=0.3)
         
         # Add percentage labels
+        max_count = max(counts) if counts else 1
         for i, (zone, count) in enumerate(zip(zones, counts)):
-            pct = count / len(confidence) * 100
-            ax2.text(i, count + 10, f'{pct:.1f}%', ha='center', fontweight='bold')
+            if count > 0:
+                pct = count / len(confidence) * 100
+                ax2.text(i, count + max_count * 0.03, f'{pct:.1f}%', ha='center', 
+                        fontweight='bold', fontsize=9)
         
-        # 3. Error Analysis (if target available)
+        # 3. Error Analysis (BOTTOM LEFT - Compressed)
         if target is not None:
-            ax3 = fig.add_subplot(gs[1, :2])
+            ax3 = fig.add_subplot(gs[1, 0])
             
             correct = predictions_array == target.values
             correct_high = ((confidence >= 0.8) & correct).sum()
@@ -556,52 +561,47 @@ class Visualizer:
             wrong_high = ((confidence >= 0.8) & ~correct).sum()
             wrong_low = ((confidence < 0.8) & ~correct).sum()
             
-            categories = ['High Confidence\nCorrect', 'High Confidence\nWRONG',
-                         'Low Confidence\nCorrect', 'Low Confidence\nWRONG']
+            categories = ['High Conf\nCorrect', 'High Conf\nWRONG',
+                         'Low Conf\nCorrect', 'Low Conf\nWRONG']
             values = [correct_high, wrong_high, correct_low, wrong_low]
             colors_err = ['green', 'red', 'lightgreen', 'orange']
             
             bars = ax3.barh(categories, values, color=colors_err, alpha=0.7, edgecolor='black')
-            ax3.set_xlabel('Number of Predictions', fontsize=11)
-            ax3.set_title('THE 18% FAILURES: Where ML Gets It Wrong\n(Low confidence errors = expected, High confidence errors = investigate!)', 
-                         fontweight='bold', fontsize=12, color='darkred')
+            ax3.set_xlabel('Count', fontsize=9)
+            ax3.set_title('THE 18% FAILURES\nWhere ML Gets It Wrong', 
+                         fontweight='bold', fontsize=9, color='darkred', pad=10)
+            ax3.tick_params(labelsize=8)
             ax3.grid(axis='x', alpha=0.3)
             
-            # Add value labels
+            # Add value labels - compact
             for bar, val in zip(bars, values):
-                ax3.text(val + 5, bar.get_y() + bar.get_height()/2, 
-                        str(val), va='center', fontweight='bold')
+                if val > 0:
+                    ax3.text(val + max(values) * 0.02, bar.get_y() + bar.get_height()/2, 
+                            str(val), va='center', fontweight='bold', fontsize=8)
         
-        # 4. Low Confidence Predictions (BOTTOM LEFT)
-        ax4 = fig.add_subplot(gs[1, 0])
+        # 4. Low Confidence Predictions (BOTTOM MIDDLE - Separate text box)
+        ax4 = fig.add_subplot(gs[1, 1])
         low_conf_mask = confidence < 0.6
-        low_conf_text = f"""
-        LOW CONFIDENCE
-        PREDICTIONS
-        
-        Count: {low_conf_mask.sum()}
-        ({low_conf_mask.sum()/len(confidence)*100:.1f}%)
-        
-        What this means:
-        
-        • Unclear policies
-        • Edge cases
-        • Contradictory
-          patterns
-        • Need human
-          review
-        
-        These reveal
-        policy gaps!
-        """
-        ax4.text(0.1, 0.5, low_conf_text, transform=ax4.transAxes,
-                fontsize=10, verticalalignment='center',
-                bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.8),
+        low_conf_text = f"""LOW CONFIDENCE PREDICTIONS
+
+Count: {low_conf_mask.sum()} ({low_conf_mask.sum()/len(confidence)*100:.1f}%)
+
+What this means:
+• Unclear policies
+• Edge cases
+• Contradictory patterns
+• Need human review
+
+These reveal policy gaps!"""
+        ax4.text(0.5, 0.5, low_conf_text, transform=ax4.transAxes,
+                fontsize=8, verticalalignment='center', horizontalalignment='center',
+                bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.8, pad=15),
                 fontfamily='monospace')
+        ax4.set_title('LOW CONFIDENCE ANALYSIS', fontweight='bold', fontsize=9, pad=10)
         ax4.axis('off')
         
-        # 5. Pattern Discovery Example (BOTTOM MIDDLE & RIGHT) - REAL DATA!
-        ax5 = fig.add_subplot(gs[1, 1:])
+        # 5. Pattern Discovery (BOTTOM RIGHT - Separate text box)
+        ax5 = fig.add_subplot(gs[1, 2])
         
         # Get real patterns from insights
         pattern_lines = ["PATTERNS ML DISCOVERED (From Your Actual Data):\n"]
@@ -619,14 +619,15 @@ class Visualizer:
                 real_patterns = insights_data['pattern_discovery']['patterns']
                 
                 for i, pattern in enumerate(real_patterns[:4], 1):
-                    pattern_lines.append(
-                        f"Pattern {i}: {pattern['pattern']} → {pattern['probability']:.0f}% {pattern['outcome']}"
-                    )
-                    pattern_lines.append(f"            (based on {pattern['sample_size']} real requests)")
+                    pattern_str = f"Pattern {i}: {pattern['pattern']}"
+                    if len(pattern_str) > 50:
+                        pattern_str = pattern_str[:47] + "..."
+                    pattern_lines.append(f"{pattern_str} → {pattern['probability']:.0f}% {pattern['outcome']}")
+                    pattern_lines.append(f"  (based on {pattern['sample_size']} requests)")
                 
                 if real_patterns:
-                    pattern_lines.append("\n→ ML reveals unconscious biases and hidden operational patterns")
-                    pattern_lines.append("→ These insights help refine IAM policies and improve consistency")
+                    pattern_lines.append("\n→ ML reveals biases and hidden patterns")
+                    pattern_lines.append("→ Helps refine IAM policies")
                 else:
                     pattern_lines.append("\nNo significant patterns found in current dataset")
             else:
@@ -636,18 +637,21 @@ class Visualizer:
         
         pattern_text = '\n'.join(pattern_lines)
         
-        ax5.text(0.05, 0.5, pattern_text, transform=ax5.transAxes,
-                fontsize=11, verticalalignment='center',
-                bbox=dict(boxstyle='round', facecolor='lightcyan', alpha=0.8),
+        ax5.text(0.5, 0.5, pattern_text, transform=ax5.transAxes,
+                fontsize=8, verticalalignment='center', horizontalalignment='center',
+                bbox=dict(boxstyle='round', facecolor='lightcyan', alpha=0.8, pad=15),
                 fontfamily='monospace', fontweight='bold')
-        ax5.set_title('HIDDEN PATTERNS REVEALED BY ML (REAL DATA)', fontweight='bold', fontsize=13)
+        ax5.set_title('HIDDEN PATTERNS REVEALED BY ML', fontweight='bold', fontsize=9, pad=10)
         ax5.axis('off')
         
         plt.suptitle('ML PREDICTION DEEP DIVE - What Your Approvals Teach the Model', 
-                    fontsize=16, fontweight='bold', y=0.98)
+                    fontsize=14, fontweight='bold', y=0.98)
+        
+        # Adjust layout to prevent text overlap - shift boxes left by adjusting margins
+        plt.subplots_adjust(top=0.93, bottom=0.06, left=0.04, right=0.98, hspace=0.55, wspace=0.35)
         
         filename = os.path.join(self.output_dir, 'ml_prediction_deep_dive.png')
-        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.savefig(filename, dpi=300, bbox_inches='tight', pad_inches=0.4, facecolor='white')
         plt.close()
         logger.info(f"  Saved {filename}")
     
